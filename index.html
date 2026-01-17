@@ -1,0 +1,308 @@
+<!-- level19-clone/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Game is Hard – Level 19 (Mini Clone)</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #151515;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    .wrap {
+      width: min(560px, 92vw);
+      text-align: center;
+      padding: 24px;
+    }
+    .hint {
+      opacity: 0.7;
+      font-size: 14px;
+      line-height: 1.4;
+      margin-top: 14px;
+    }
+    .text {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      margin: 0;
+      color: #ff8a00; /* orange (default) */
+      user-select: none;
+    }
+    .play {
+      margin: 22px auto 0;
+      width: 74px;
+      height: 74px;
+      border-radius: 999px;
+      display: none;
+      place-items: center;
+      background: #00c853;
+      cursor: pointer;
+      border: 0;
+    }
+    .play:active { transform: scale(0.98); }
+    .tri {
+      width: 0; height: 0;
+      border-top: 14px solid transparent;
+      border-bottom: 14px solid transparent;
+      border-left: 22px solid #0b1b10;
+      margin-left: 4px;
+    }
+    .card {
+      margin-top: 18px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.06);
+      text-align: left;
+      font-size: 13px;
+      line-height: 1.35;
+      opacity: 0.9;
+    }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .btn {
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: #fff;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      font-weight: 650;
+    }
+    .btn:active { transform: scale(0.99); }
+    .kv { display: grid; grid-template-columns: 120px 1fr; gap: 8px; }
+    .k { opacity: 0.75; }
+    .v { font-variant-numeric: tabular-nums; }
+    .ok { color: #00c853; font-weight: 750; }
+    .bad { color: #ff8a00; font-weight: 750; }
+    .done {
+      display: none;
+      margin-top: 14px;
+      font-weight: 800;
+      color: #00c853;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p id="mainText" class="text">i need some rest.</p>
+
+    <button id="playBtn" class="play" aria-label="Play">
+      <div class="tri"></div>
+    </button>
+
+    <div id="doneMsg" class="done">Level cleared.</div>
+
+    <div class="row">
+      <button id="enableBtn" class="btn" style="display:none;">Enable motion</button>
+      <button id="simBtn" class="btn" style="display:none;">Simulate rest (desktop)</button>
+      <button id="resetBtn" class="btn">Reset</button>
+    </div>
+
+    <div class="card">
+      <div class="kv">
+        <div class="k">Flat (face-up)</div><div id="flatVal" class="v bad">no</div>
+        <div class="k">Still timer</div><div id="timerVal" class="v">0.0 s</div>
+        <div class="k">Status</div><div id="statusVal" class="v bad">not resting</div>
+      </div>
+      <div class="hint">
+        Tip: put the phone on a hard table, screen up. Hands off. If you’re on iOS, you must tap
+        <b>Enable motion</b> first.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const mainText = document.getElementById("mainText");
+    const playBtn  = document.getElementById("playBtn");
+    const doneMsg  = document.getElementById("doneMsg");
+
+    const enableBtn = document.getElementById("enableBtn");
+    const simBtn    = document.getElementById("simBtn");
+    const resetBtn  = document.getElementById("resetBtn");
+
+    const flatVal   = document.getElementById("flatVal");
+    const timerVal  = document.getElementById("timerVal");
+    const statusVal = document.getElementById("statusVal");
+
+    // Tunables (feel free to tweak)
+    const FLAT_DEG = 15;          // how close to flat face-up
+    const STILL_MS = 2500;        // time needed to "rest"
+    const ACC_DELTA = 0.8;        // motion threshold (sum abs deltas)
+    const ROT_DELTA = 12;         // rotation threshold (sum abs deltas)
+
+    let isFlat = false;
+    let stableStart = null;
+    let cleared = false;
+
+    let lastA = null;
+    let lastR = null;
+
+    function setNotResting() {
+      if (cleared) return;
+      mainText.style.color = "#ff8a00";
+      playBtn.style.display = "none";
+      statusVal.textContent = "not resting";
+      statusVal.className = "v bad";
+    }
+
+    function setResting() {
+      if (cleared) return;
+      mainText.style.color = "#00c853";
+      playBtn.style.display = "grid";
+      statusVal.textContent = "resting";
+      statusVal.className = "v ok";
+    }
+
+    function resetAll() {
+      cleared = false;
+      stableStart = null;
+      lastA = null;
+      lastR = null;
+      doneMsg.style.display = "none";
+      timerVal.textContent = "0.0 s";
+      isFlat = false;
+      flatVal.textContent = "no";
+      flatVal.className = "v bad";
+      setNotResting();
+    }
+
+    function updateFlat(b, g) {
+      // Most phones: face-up flat tends toward beta≈0 and gamma≈0.
+      // We keep it generous so it works across devices.
+      isFlat = (Math.abs(b) <= FLAT_DEG && Math.abs(g) <= FLAT_DEG);
+      flatVal.textContent = isFlat ? "yes" : "no";
+      flatVal.className = isFlat ? "v ok" : "v bad";
+      if (!isFlat) stableStart = null;
+    }
+
+    function sumAbsDelta(a, b) {
+      return Math.abs((a?.x ?? 0) - (b?.x ?? 0)) +
+             Math.abs((a?.y ?? 0) - (b?.y ?? 0)) +
+             Math.abs((a?.z ?? 0) - (b?.z ?? 0));
+    }
+
+    function onMotion(e) {
+      if (cleared) return;
+
+      const a = e.accelerationIncludingGravity
+        ? { x: e.accelerationIncludingGravity.x, y: e.accelerationIncludingGravity.y, z: e.accelerationIncludingGravity.z }
+        : null;
+
+      const r = e.rotationRate
+        ? { x: e.rotationRate.alpha, y: e.rotationRate.beta, z: e.rotationRate.gamma }
+        : null;
+
+      const movedA = lastA && a ? (sumAbsDelta(a, lastA) > ACC_DELTA) : false;
+      const movedR = lastR && r ? (sumAbsDelta(r, lastR) > ROT_DELTA) : false;
+      const moved = movedA || movedR;
+
+      lastA = a;
+      lastR = r;
+
+      const now = performance.now();
+
+      if (!isFlat) {
+        setNotResting();
+        timerVal.textContent = "0.0 s";
+        return;
+      }
+
+      if (moved) {
+        stableStart = null;
+        setNotResting();
+        timerVal.textContent = "0.0 s";
+        return;
+      }
+
+      if (stableStart === null) stableStart = now;
+
+      const elapsed = now - stableStart;
+      timerVal.textContent = (elapsed / 1000).toFixed(1) + " s";
+
+      if (elapsed >= STILL_MS) setResting();
+      else setNotResting();
+    }
+
+    function onOrient(e) {
+      // beta: front-to-back tilt, gamma: left-to-right tilt
+      const beta = (typeof e.beta === "number") ? e.beta : 999;
+      const gamma = (typeof e.gamma === "number") ? e.gamma : 999;
+      updateFlat(beta, gamma);
+    }
+
+    async function enableSensors() {
+      // iOS 13+ needs permission via user gesture
+      if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+        const p = await DeviceMotionEvent.requestPermission();
+        if (p !== "granted") return false;
+      }
+      if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+        const p = await DeviceOrientationEvent.requestPermission();
+        if (p !== "granted") return false;
+      }
+
+      window.addEventListener("devicemotion", onMotion, { passive: true });
+      window.addEventListener("deviceorientation", onOrient, { passive: true });
+      return true;
+    }
+
+    function hasMotionSupport() {
+      return ("DeviceMotionEvent" in window) || ("DeviceOrientationEvent" in window);
+    }
+
+    // Play button
+    playBtn.addEventListener("click", () => {
+      if (playBtn.style.display !== "grid") return;
+      cleared = true;
+      doneMsg.style.display = "block";
+    });
+
+    // Reset
+    resetBtn.addEventListener("click", resetAll);
+
+    // Enable motion button (only shown when needed)
+    enableBtn.addEventListener("click", async () => {
+      const ok = await enableSensors();
+      if (!ok) {
+        statusVal.textContent = "motion blocked";
+        statusVal.className = "v bad";
+      } else {
+        enableBtn.style.display = "none";
+      }
+    });
+
+    // Desktop simulation: click once to “rest”
+    simBtn.addEventListener("click", () => {
+      if (cleared) return;
+      updateFlat(0, 0);
+      stableStart = performance.now() - (STILL_MS + 10);
+      setResting();
+      timerVal.textContent = (STILL_MS / 1000).toFixed(1) + " s";
+    });
+
+    // Init UI
+    resetAll();
+
+    // Decide which helper buttons to show
+    const needsPermission =
+      (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") ||
+      (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function");
+
+    if (needsPermission) {
+      enableBtn.style.display = "inline-block";
+    } else if (hasMotionSupport()) {
+      // Auto-start on platforms that do not require the permission prompt
+      enableSensors();
+    } else {
+      simBtn.style.display = "inline-block";
+      statusVal.textContent = "no sensors detected";
+      statusVal.className = "v bad";
+    }
+  </script>
+</body>
+</html>
